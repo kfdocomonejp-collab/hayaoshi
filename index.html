@@ -114,10 +114,7 @@ function block(title,msg,extra){gate.querySelector('h2').textContent=title;gateM
     const ctx=liff.getContext();
     const where=ctx?.type, id=ctx?.groupId||ctx?.roomId||ctx?.utouId||'';
     if(!ALLOWED_GROUP_ID){
-      // 設定モード：IDを表示して、そのまま遊べる
-      block('設定モード',`開いた場所: ${where}<br>この文字列を ALLOWED_GROUP_ID に貼ってね`,id||'（取得できず：トークのリンクから開いてください）');
-      setTimeout(()=>{gate.hidden=true;},6000);
-      document.getElementById('who').textContent='設定モード';
+      gate.hidden=true;
     }else if(id!==ALLOWED_GROUP_ID){
       block('このグループ限定です','グループのトークに貼ってあるリンクをそのままタップして開いてください。');return;
     }else{
