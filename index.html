@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>早押しバトル</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+1+Code:wght@500;700&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap">
+<style>
+:root{
+  --bg:#0d1117; --panel:#161c26; --fg:#f2f5f8; --muted:#8b96a8;
+  --wait:#c0392b; --go:#2ecc71; --line:#06c755; --ink:#0b0e13;
+  --display:"Zen Kaku Gothic New",system-ui,sans-serif;
+  --mono:"M PLUS 1 Code",ui-monospace,monospace;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--display);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-top:max(12px,env(safe-area-inset-top,0px));padding-bottom:max(12px,env(safe-area-inset-bottom,0px));
+  display:flex;flex-direction:column;gap:12px;box-sizing:border-box}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+h1{margin:0;font-size:1.25rem;font-weight:900;letter-spacing:.04em}
+#who{font-size:.8rem;color:var(--muted);max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pad{flex:1;min-height:260px;border-radius:20px;background:var(--panel);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:10px;text-align:center;cursor:pointer;user-select:none;
+  -webkit-user-select:none;-webkit-tap-highlight-color:transparent;transition:background .08s;padding:16px;box-sizing:border-box}
+#pad.wait{background:var(--wait)}
+#pad.go{background:var(--go);color:var(--ink)}
+#big{font-family:var(--mono);font-size:clamp(2.6rem,14vw,4.5rem);font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+#sub{font-size:1rem;font-weight:700;opacity:.9;text-wrap:balance}
+#rounds{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.r{background:var(--panel);border-radius:10px;padding:8px 4px;text-align:center;font-family:var(--mono);
+  font-size:.85rem;font-variant-numeric:tabular-nums;color:var(--muted)}
+.r.done{color:var(--fg)}
+#actions{display:flex;gap:8px}
+button{flex:1;border:0;border-radius:12px;padding:14px;font:700 1rem var(--display);cursor:pointer;color:var(--fg);background:var(--panel)}
+button:focus-visible{outline:2px solid var(--go);outline-offset:2px}
+#share{background:var(--line);color:#fff}
+#best{font-size:.8rem;color:var(--muted);text-align:center;font-family:var(--mono)}
+#gate{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:12px;padding:24px;text-align:center;box-sizing:border-box;z-index:10}
+#gate h2{margin:0;font-size:1.3rem}
+#gate p{margin:0;color:var(--muted);max-width:32ch;line-height:1.6}
+#gate code{display:block;margin-top:8px;padding:10px;background:var(--panel);border-radius:8px;font-family:var(--mono);
+  font-size:.8rem;word-break:break-all;color:var(--fg);user-select:all}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion:reduce){#pad{transition:none}}
+</style>
+</head>
+<body>
+
+<header><h1>早押しバトル</h1><span id="who">…</span></header>
+<div id="pad" role="button" tabindex="0"><div id="big">TAP</div><div id="sub">タップしてスタート。赤→緑に変わった瞬間に押せ！</div></div>
+<div id="rounds"></div>
+<div id="actions">
+  <button id="retry" hidden>もう一回</button>
+  <button id="share" hidden>グループに挑戦状を送る</button>
+</div>
+<div id="best"></div>
+
+<div id="gate"><h2>読み込み中…</h2><p id="gatemsg"></p></div>
+
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+// ====== ここだけ書き換える ======
+const LIFF_ID = "YOUR_LIFF_ID";          // LINE Developers のLIFFアプリに表示されるID（例: 2001234567-AbCdEfGh）
+const ALLOWED_GROUP_ID = "";             // 空のままだと「設定モード」：開いたトークのIDを画面に表示する
+// ================================
+
+const ROUNDS=5, pad=document.getElementById('pad'), big=document.getElementById('big'), sub=document.getElementById('sub');
+const roundsEl=document.getElementById('rounds'), retry=document.getElementById('retry'), share=document.getElementById('share'), bestEl=document.getElementById('best');
+const gate=document.getElementById('gate'), gateMsg=document.getElementById('gatemsg');
+let state='idle', times=[], t0=0, timer=null, name='ゲスト', inLine=false;
+
+function renderRounds(){roundsEl.innerHTML='';for(let i=0;i<ROUNDS;i++){const d=document.createElement('div');d.className='r'+(times[i]!=null?' done':'');d.textContent=times[i]!=null?times[i]+'ms':(i+1)+'回目';roundsEl.appendChild(d);}}
+function loadBest(){try{return +localStorage.getItem('hayaoshi_best')||0}catch{return 0}}
+function saveBest(v){try{localStorage.setItem('hayaoshi_best',v)}catch{}}
+function showBest(){const b=loadBest();bestEl.textContent=b?`自己ベスト 平均 ${b}ms`:''}
+
+function arm(){state='wait';pad.className='wait';big.textContent='待て';sub.textContent='緑になったら押す';
+  timer=setTimeout(()=>{state='go';pad.className='go';big.textContent='押せ！';sub.textContent='';t0=performance.now();},1200+Math.random()*2500);}
+function tap(){
+  if(state==='idle'){times=[];renderRounds();retry.hidden=share.hidden=true;arm();return;}
+  if(state==='wait'){clearTimeout(timer);state='idle';pad.className='';big.textContent='早い！';sub.textContent='フライング。タップしてやり直し';return;}
+  if(state==='go'){const ms=Math.round(performance.now()-t0);times.push(ms);renderRounds();
+    if(times.length<ROUNDS){state='between';pad.className='';big.textContent=ms+'ms';sub.textContent=`${times.length}/${ROUNDS}　タップで次へ`;return;}
+    finish();return;}
+  if(state==='between'){arm();}
+}
+function finish(){state='done';const avg=Math.round(times.reduce((a,b)=>a+b)/times.length);pad.className='';
+  big.textContent=avg+'ms';const rank=avg<200?'S 神速':avg<250?'A 剣豪':avg<320?'B 普通の人':'C 寝起き';
+  sub.textContent=`平均 ${avg}ms　ランク ${rank}`;const b=loadBest();if(!b||avg<b)saveBest(avg);showBest();
+  retry.hidden=false;share.hidden=!inLine;
+  share.dataset.msg=`【早押しバトル】${name}の平均反応速度 ${avg}ms（${rank}）！ 抜けるもんなら抜いてみろ👉 https://liff.line.me/${LIFF_ID}`;
+}
+pad.addEventListener('pointerdown',e=>{e.preventDefault();tap();});
+pad.addEventListener('keydown',e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();tap();}});
+retry.onclick=()=>{state='idle';tap();};
+share.onclick=async()=>{const msg=share.dataset.msg;
+  try{
+    if(liff.isApiAvailable('shareTargetPicker')){await liff.shareTargetPicker([{type:'text',text:msg}]);}
+    else if(liff.getContext()?.type!=='none'){await liff.sendMessages([{type:'text',text:msg}]);alert('送った！');}
+  }catch(e){}
+};
+renderRounds();showBest();
+
+function block(title,msg,extra){gate.querySelector('h2').textContent=title;gateMsg.innerHTML=msg+(extra?`<code>${extra}</code>`:'');}
+
+(async()=>{
+  try{
+    await liff.init({liffId:LIFF_ID});
+    if(!liff.isInClient()){block('LINEの中で開いてね','このゲームはLINEのトーク画面のリンクをそのままタップしたときだけ遊べます。');return;}
+    inLine=true;
+    const ctx=liff.getContext();
+    const where=ctx?.type, id=ctx?.groupId||ctx?.roomId||ctx?.utouId||'';
+    if(!ALLOWED_GROUP_ID){
+      // 設定モード：IDを表示して、そのまま遊べる
+      block('設定モード',`開いた場所: ${where}<br>この文字列を ALLOWED_GROUP_ID に貼ってね`,id||'（取得できず：トークのリンクから開いてください）');
+      setTimeout(()=>{gate.hidden=true;},6000);
+      document.getElementById('who').textContent='設定モード';
+    }else if(id!==ALLOWED_GROUP_ID){
+      block('このグループ限定です','グループのトークに貼ってあるリンクをそのままタップして開いてください。');return;
+    }else{
+      gate.hidden=true;
+    }
+    if(liff.isLoggedIn()){const p=await liff.getProfile();name=p.displayName;document.getElementById('who').textContent=name;}
+  }catch(e){
+    block('起動できませんでした',`LIFFの設定を確認してください。<br><small>${e.message||e}</small>`);
+  }
+})();
+</script>
+</body>
+</html>
